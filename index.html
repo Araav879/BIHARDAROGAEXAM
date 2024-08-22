@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiz Application</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #login, #instructions, #quiz, #result, #answer-sheet {
+            display: none;
+        }
+        #login input {
+            display: block;
+            margin: 10px 0;
+            padding: 8px;
+            width: 100%;
+        }
+        #login button {
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+        }
+        #quiz #timer {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-weight: bold;
+        }
+        #quiz #options-box button {
+            display: inline-block;
+            margin: 10px 5px;
+            padding: 10px;
+            width: calc(45% - 10px);
+            cursor: pointer;
+            border: 1px solid #ddd;
+        }
+        #quiz #options-box button:hover {
+            background-color: #f1f1f1;
+        }
+        #quiz .controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+        #quiz .controls button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            cursor: pointer;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+        }
+        #quiz #slider {
+            margin-top: 20px;
+            text-align: center;
+        }
+        #quiz #slider button {
+            padding: 5px 10px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            border: 1px solid #ddd;
+            margin: 0 2px;
+        }
+        #quiz #slider button.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        #result button, #result .button-bar button {
+            padding: 10px 20px;
+            margin: 10px 5px;
+            cursor: pointer;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            display: inline-block;
+        }
+        #result .button-bar {
+            text-align: center;
+            margin-top: 20px;
+        }
+        #result .bar-graph {
+            margin: 20px auto;
+            width: 80%;
+            height: 200px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.1/chart.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+</head>
+<body>
+    <div id="login">
+        <h2>Login</h2>
+        <input type="text" id="username" placeholder="Enter Your Name">
+        <input type="text" id="mobile" placeholder="Enter Your Mobile Number">
+        <input type="email" id="email" placeholder="Enter Your Email ID">
+        <button onclick="showPage('instructions')">Login</button>
+    </div>
+
+    <div id="instructions">
+        <h2>Instructions</h2>
+        <p>Please read the instructions carefully before starting the quiz.</p>
+        <button onclick="showPage('quiz')">Let's Start</button>
+    </div>
+
+    <div id="quiz">
+        <div id="timer">Time Left: 00:00</div>
+        <div id="question-box"></div>
+        <div id="options-box"></div>
+        <div class="controls">
+            <button id="btn-back" onclick="previousQuestion()">Back</button>
+            <button id="btn-slider" onclick="toggleSlider()">Navigate</button>
+            <button id="btn-next" onclick="nextQuestion()">Next</button>
+            <button id="btn-submit" onclick="submitQuiz()">Submit</button>
+        </div>
+        <div id="slider" style="display: none;">
+            <!-- Slider buttons will be dynamically added here -->
+        </div>
+    </div>
+
+    <div id="result">
+        <h2>RESULT</h2>
+        <p id="score"></p>
+        <p>Total Time Taken: <span id="time-taken"></span></p>
+        <div class="button-bar">
+            <button onclick="showAnswerSheet()">VIEW ANSWER SHEET</button>
+            <button onclick="printAnswerSheet()">PRINT ANSWER SHEET</button>
+        </div>
+        <div class="bar-graph">
+            <canvas id="resultChart"></canvas>
+        </div>
+    </div>
+
+    <div id="answer-sheet">
+        <h2>ANSWER SHEET</h2>
+        <div id="answer-list"></div>
+    </div>
+
+    <script>
+        let questions = [];
+        let answers = [];
+        let questionIndex = 0;
+        let totalQuestions = 0;
+        let correctAnswers = 0;
+        let timerInterval;
+        let startTime;
+
+        const csvUrl = 'https://raw.githubusercontent.com/Govexam/Question-MCQ/main/readdr%20-%20readdr.csv';
+
+        Papa.parse(csvUrl, {
+            download: true,
+            header: true,
+            complete: function(results) {
+                questions = results.data;
+                totalQuestions = questions.length;
+                buildSlider();
+            }
+        });
+
+        function startQuiz() {
+            const username = document.getElementById('username').value;
+            const mobile = document.getElementById('mobile').value;
+            const email = document.getElementById('email').value;
+
+            if (!username || !mobile || !email) {
+                alert('Please fill in all the details.');
+                return;
+            }
+
+            showPage('instructions');
+        }
+
+        function showPage(pageId) {
+            document.getElementById('login').style.display = 'none';
+            document.getElementById('instructions').style.display = 'none';
+            document.getElementById('quiz').style.display = 'none';
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('answer-sheet').style.display = 'none';
+
+            document.getElementById(pageId).style.display = 'block';
+
+            if (pageId === 'quiz') {
+                startTime = new Date();
+                startTimer();
+                displayQuestion();
+            }
+        }
+
+        function displayQuestion() {
+            if (questionIndex < 0 || questionIndex >= totalQuestions) return;
+
+            const currentQuestion = questions[questionIndex];
+            document.getElementById('question-box').textContent = currentQuestion.Question;
+
+            const optionsBox = document.getElementById('options-box');
+            optionsBox.innerHTML = '';
+
+            for (let i = 1; i <= 4; i++) {
+                const option = document.createElement('button');
+                option.textContent = currentQuestion['Option ' + i];
+                option.onclick = () => selectAnswer(i);
+                optionsBox.appendChild(option);
+            }
+
+            updateNavigationSlider();
+            toggleButtons();
+        }
+
+        function selectAnswer(optionIndex) {
+            answers[questionIndex] = optionIndex;
+            nextQuestion();
+        }
+
+        function nextQuestion() {
+            questionIndex++;
+            if (questionIndex >= totalQuestions) {
+                submitQuiz();
+            } else {
+                displayQuestion();
+            }
+        }
+
+        function previousQuestion() {
+            questionIndex--;
+            if (questionIndex >= 0) {
+                displayQuestion();
+            }
+        }
+
+        function submitQuiz() {
+            clearInterval(timerInterval);
+
+            const endTime = new Date();
+            const timeTaken = Math.round((endTime - startTime) / 1000);
+            const minutes = Math.floor(timeTaken / 60);
+            const seconds = timeTaken % 60;
+            document.getElementById('time-taken').textContent = `${minutes}m ${seconds}s`;
+
+            correctAnswers = 0;
+            let incorrectAnswers = 0;
+            let unattempted = 0;
+
+            for (let i = 0; i < totalQuestions; i++) {
+                if (answers[i] === parseInt(questions[i].Answer)) {
+                    correctAnswers++;
+                } else if (answers[i] == null) {
+                    unattempted++;
+                } else {
+                    incorrectAnswers++;
+                }
+            }
+
+            document.getElementById('score').textContent = `Your Score: ${correctAnswers} / ${totalQuestions}`;
+
+            // Draw chart
+            const ctx = document.getElementById('resultChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Correct', 'Incorrect', 'Unattempted'],
+                    datasets: [{
+                        label: 'Number of Questions',
+                        data: [correctAnswers, incorrectAnswers, unattempted],
+                        backgroundColor: ['#4CAF50', '#FF5733', '#FFC300']
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            showPage('result');
+        }
+
+        function startTimer() {
+                let timeLeft = totalQuestions * 60; // 60 seconds per question
+                const timerElement = document.getElementById('timer');
+
+                timerInterval = setInterval(() => {
+                    if (timeLeft <= 0) {
+                        clearInterval(timerInterval);
+                        submitQuiz();
+                    } else {
+                        timeLeft--;
+                        const minutes = Math.floor(timeLeft / 60);
+                        const seconds = timeLeft % 60;
+                        timerElement.textContent = `Time Left: ${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+                    }
+                }, 1000);
+            }
+
+            function buildSlider() {
+                const slider = document.getElementById('slider');
+                slider.innerHTML = '';
+
+                for (let i = 0; i < totalQuestions; i++) {
+                    const button = document.createElement('button');
+                    button.textContent = i + 1;
+                    button.onclick = () => {
+                        questionIndex = i;
+                        displayQuestion();
+                        toggleSlider(); // Hide the slider after selecting a question
+                    };
+                    slider.appendChild(button);
+                }
+            }
+
+            function toggleSlider() {
+                const slider = document.getElementById('slider');
+                slider.style.display = slider.style.display === 'none' ? 'block' : 'none';
+            }
+
+            function updateNavigationSlider() {
+                const sliderButtons = document.getElementById('slider').getElementsByTagName('button');
+
+                for (let i = 0; i < sliderButtons.length; i++) {
+                    sliderButtons[i].classList.remove('active');
+                }
+
+                sliderButtons[questionIndex].classList.add('active');
+            }
+
+            function toggleButtons() {
+                document.getElementById('btn-back').style.display = questionIndex > 0 ? 'inline-block' : 'none';
+                document.getElementById('btn-next').style.display = questionIndex < totalQuestions - 1 ? 'inline-block' : 'none';
+                document.getElementById('btn-submit').style.display = questionIndex === totalQuestions - 1 ? 'inline-block' : 'none';
+            }
+
+            function showAnswerSheet() {
+                const answerList = document.getElementById('answer-list');
+                answerList.innerHTML = '';
+
+                for (let i = 0; i < totalQuestions; i++) {
+                    const question = document.createElement('div');
+                    question.textContent = `Q${i + 1}: ${questions[i].Question}`;
+                    answerList.appendChild(question);
+
+                    const userAnswer = document.createElement('div');
+                    userAnswer.textContent = `Your Answer: ${answers[i] ? questions[i]['Option ' + answers[i]] : 'Not Attempted'}`;
+                    userAnswer.style.color = answers[i] == questions[i].Answer ? 'green' : 'red';
+                    answerList.appendChild(userAnswer);
+
+                    const correctAnswer = document.createElement('div');
+                    correctAnswer.textContent = `Correct Answer: ${questions[i]['Option ' + questions[i].Answer]}`;
+                    correctAnswer.style.color = 'blue';
+                    answerList.appendChild(correctAnswer);
+
+                    answerList.appendChild(document.createElement('hr'));
+                }
+
+                showPage('answer-sheet');
+            }
+
+            function printAnswerSheet() {
+                window.print();
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                showPage('login');
+            });
+        </script>
+    </body>
+</html>
